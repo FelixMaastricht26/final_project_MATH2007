@@ -1,0 +1,266 @@
+import json
+
+import pandas as pd
+import matplotlib.pyplot as plt
+
+
+# Run this script from the project folder so these paths work.
+DATA_PATH = "data/meteorite_landings.csv"
+OUTPUT_PATH = "outputs"
+WORLD_MAP_PATH = "data/world_countries.geojson"
+
+
+def load_data():
+    """Read the CSV and give the mass column a simpler name."""
+    # pandas reads the file into a DataFrame: a table with columns.
+    data = pd.read_csv(DATA_PATH)
+    # The values stay in grams; only the column name changes.
+    # return sends this table back to the place where load_data() was called.
+    return data.rename(columns={"mass (g)": "mass_g"})
+
+
+def clean_location_data(data):
+    """Keep records with the information needed for a geographic plot."""
+    # delete a row if its mass, latitude, or longitude is missing.
+    # This gives us records that we can filter by mass and put on the map.
+    location_data = data.dropna(subset=["mass_g", "reclat", "reclong"])
+
+    # Keep only coordinates within the possible latitude and longitude.
+    # The & joins the conditions, so each row must pass all the checks.
+    valid_coordinates = (
+        (location_data["reclat"] >= -90)
+        & (location_data["reclat"] <= 90)
+        & (location_data["reclong"] >= -180)
+        & (location_data["reclong"] <= 180)
+    )
+    # valid_coordinates contains True or False for each row.
+    return location_data[valid_coordinates].copy()
+
+
+def draw_world_map():
+    """Draw country outlines from the local Natural Earth map file."""
+    # Load the GeoJSON as Python dictionaries and lists.
+    # The with block closes the file automatically once it has been read.
+    with open(WORLD_MAP_PATH) as map_file:
+        world_map = json.load(map_file)
+
+    # Each feature describes a country and the coordinates of the borders.
+    for country in world_map["features"]:
+        geometry = country["geometry"]
+        # A country can be one polygon or several polygons (ex islands).
+        if geometry["type"] == "Polygon":
+            polygons = [geometry["coordinates"]]
+        else:
+            polygons = geometry["coordinates"]
+
+        for polygon in polygons:
+            longitudes = []
+            latitudes = []
+            for point in polygon[0]:
+                # GeoJSON stores each point as [longitude, latitude].
+                longitudes.append(point[0])
+                latitudes.append(point[1])
+            # Join the border points with a thin line, behind the meteorite dots.
+            plt.plot(
+                longitudes, latitudes,
+                color="gray",
+                linewidth=0.45, zorder=1,
+            )
+
+
+def plot_locations(large_meteorites):
+    """Save a simple geographic scatter plot for the report."""
+    # main() passes mapped_meteorites here; large_meteorites is its local name.
+    # Start a new figure, then draw the country borders on it.
+    plt.figure(figsize=(10, 5))
+    draw_world_map()
+    # Each dot is one record, with longitude on the x-axis and latitude on the y-axis.
+    plt.scatter(
+        large_meteorites["reclong"],
+        large_meteorites["reclat"],
+        s=5,
+        alpha=0.4,
+        color="purple",
+        edgecolors="none",
+        zorder=3,
+    )
+    # Show the whole world and mark the axes at regular intervals in degrees.
+    plt.xlim(-180, 180)
+    plt.ylim(-90, 90)
+    plt.xticks(range(-180, 181, 60))
+    plt.yticks(range(-90, 91, 30))
+    plt.xlabel("Longitude (degrees)")
+    plt.ylabel("Latitude (degrees)")
+    # n is the number of records actually shown, after the location filters.
+    plt.title(f"Recorded meteorites weighing at least 1 kg (n = {len(large_meteorites):,})")
+    plt.grid(alpha=0.2, zorder=2)
+
+    # Save a detailed image for the report; main() displays the figure later.
+    plt.savefig(OUTPUT_PATH + "/meteorite_locations.png", dpi=300)
+
+
+def count_mass_thresholds(data):
+    """Count records at or above each threshold, regardless of location."""
+    # A missing location is fine here, but we need a mass to count the record.
+    mass_data = data.dropna(subset=["mass_g"])
+    # These gram values correspond to 1 kg, 10 kg, 100 kg, and 1 ton.
+    thresholds_g = [1_000, 10_000, 100_000, 1_000_000]
+    counts = []
+    # These groups overlap: a 100 kg meteorite also counts in the 1 kg and 10 kg group.
+    for threshold in thresholds_g:
+        # Keep all rows with mass that meets the current minimum, including =.
+        matching_records = mass_data[mass_data["mass_g"] >= threshold]
+        counts.append(len(matching_records))
+    # The counts follow the same order as thresholds_g.
+    return counts
+
+
+def plot_mass_thresholds(counts):
+    """Save cumulative counts with exact values above the bars."""
+    # The caller supplies counts in this order, so each label matches its bar.
+    labels = ["≥ 1 kg", "≥ 10 kg", "≥ 100 kg", "≥ 1 ton"]
+    # Use positions 0, 1, 2, and 3, then replace those numbers with readable labels.
+    positions = range(len(labels))
+    plt.figure(figsize=(7, 4))
+    plt.bar(positions, counts, color="purple")
+    plt.xticks(positions, labels)
+    plt.xlabel("Minimum recorded mass")
+    plt.ylabel("Number of meteorite records")
+    plt.title("Meteorite counts decrease with increasing mass threshold")
+    plt.ylim(0, max(counts) * 1.15)  # Leave space above the bars for the counts.
+    plt.grid(axis="y", alpha=0.25)
+    # Write the exact count just above each bar.
+    for position in range(len(counts)):
+        count = counts[position]
+        plt.text(position, count + max(counts) * 0.02, f"{count:,}", ha="center")
+    plt.tight_layout()
+    plt.savefig(OUTPUT_PATH + "/mass_threshold_counts.png", dpi=300)
+
+
+def select_heaviest(data):
+    """Select the ten meteorites with the largest recorded masses."""
+    # We cannot rank records with no mass, so drop those rows first.
+    mass_data = data.dropna(subset=["mass_g"])
+    # descending order puts the largest mass first; head(10) takes the first ten rows.
+    sorted_data = mass_data.sort_values("mass_g", ascending=False)
+    top_ten = sorted_data.head(10)
+    # Return a separate copy so we can add country names without changing the source.
+    return top_ten.copy()
+
+
+def add_countries(top_ten):
+    """Add country names checked manually using online meteorite sources."""
+    # The CSV has no country column, so these names were checked separately.
+    # Sources and checking date are listed in README.md.
+    country_names = {
+        "Hoba": "Namibia",
+        "Cape York": "Greenland (Denmark)",
+        "Campo del Cielo": "Argentina",
+        "Canyon Diablo": "United States",
+        "Armanty": "China",
+        "Gibeon": "Namibia",
+        "Chupaderos": "Mexico",
+        "Mundrabilla": "Australia",
+        "Sikhote-Alin": "Russia",
+        "Bacubirito": "Mexico",
+    }
+    # Build the country list in the same order as the rows in top_ten.
+    countries = []
+    for position in range(len(top_ten)):
+        # iloc selects a row by position, even if its original index is different.
+        meteorite_name = top_ten.iloc[position]["name"]
+        if meteorite_name in country_names:
+            # Look up the country using the meteorite's name as the dictionary key.
+            countries.append(country_names[meteorite_name])
+        else:
+            # If the dataset changes, check any new top-ten names online.
+            countries.append("Unknown")
+
+    # Add the list as a new column on a copy of the supplied table.
+    top_ten = top_ten.copy()
+    top_ten["country"] = countries
+    return top_ten
+
+
+def plot_heaviest(top_ten):
+    """Plot the recorded masses in metric tonnes."""
+    # Ascending order places the heaviest record at the top of a barr plot.
+    plot_data = top_ten.sort_values("mass_g")
+    # One tonne is one million grams.
+    masses_tonnes = plot_data["mass_g"] / 1_000_000
+    # Each row gets a position on the vertical axis, with mass along the horizontal axis.
+    positions = range(len(plot_data))
+    plt.figure(figsize=(12, 5.5))
+    plt.barh(positions, masses_tonnes, color="purple")
+    labels = []
+    for position in range(len(plot_data)):
+        record = plot_data.iloc[position]
+        # Use the recorded year, or a readable label if it is missing.
+        if pd.isna(record["year"]):
+            year_label = "year unknown"
+        else:
+            year_label = str(int(record["year"]))  # Avoid displaying years like 1920.0.
+        labels.append(record["name"] + " — " + record["country"] + " (" + year_label + ")")
+    # Replace the vertical position numbers with the labels built above.
+    plt.yticks(positions, labels)
+    plt.xlabel("Recorded mass (metric tonnes)")
+    plt.title("Ten heaviest meteorites by recorded mass")
+    # Leave room to the right of the longest bar for its mass label.
+    plt.xlim(0, masses_tonnes.max() * 1.15)
+    plt.grid(axis="x", alpha=0.25)
+    # Put the mass at the end of each bar so it can be read directly.
+    for position in range(len(masses_tonnes)):
+        mass = masses_tonnes.iloc[position]
+        # :g removes unnecessary decimal zeros; va centers the text vertically.
+        plt.text(mass + 0.5, position, f"{mass:g}", va="center")
+    plt.tight_layout()
+    plt.savefig(OUTPUT_PATH + "/heaviest_meteorites.png", dpi=300)
+
+
+def main():
+    """Prepare the data and create the three charts and two summary tables."""
+    # This is where the analysis runs, in order. Each function is called with the data it needs.
+    data = load_data()
+    # Only the map needs the version with missing or invalid coordinates removed.
+    location_data = clean_location_data(data)
+
+    # The CSV stores mass in grams, so 1 kg is 1,000 g.
+    large_meteorites = location_data[location_data["mass_g"] >= 1_000]
+    # This includes meteorites weighing exactly 1 kg.
+
+
+    zero_coordinates = (
+        (large_meteorites["reclat"] == 0)
+        & (large_meteorites["reclong"] == 0)
+    )
+    # Both coordinates must be zero; a zero latitude or longitude alone is valid.
+    # Treat repeated (0, 0) pairs as questionable locations for this map.
+    # The ~ reverses the filter, keeping the rows that are not at (0, 0).
+    mapped_meteorites = large_meteorites[~zero_coordinates].copy()
+    # The function receives this filtered table through its large_meteorites parameter.
+    plot_locations(mapped_meteorites)
+
+    # Use the original data for mass counts, including records we could not map.
+    counts = count_mass_thresholds(data)
+    # Save the numbers as a table as well as showing them in a chart.
+    threshold_summary = pd.DataFrame({
+        "minimum_mass_g": [1_000, 10_000, 100_000, 1_000_000],
+        "record_count": counts,
+    })
+    # index=False leaves pandas' row numbers out of the exported CSV.
+    threshold_summary.to_csv(OUTPUT_PATH + "/mass_threshold_counts.csv", index=False)
+    plot_mass_thresholds(counts)
+
+    # Find the ten heaviest records first, then add their country names.
+    top_ten = add_countries(select_heaviest(data))
+    # Export the columns useful for checking the ranking and writing the report.
+    top_ten[["id", "name", "mass_g", "year", "fall", "reclat", "reclong", "country"]].to_csv(
+        OUTPUT_PATH + "/heaviest_meteorites.csv", index=False
+    )
+    plot_heaviest(top_ten)
+
+    # Show the three figures together after saving them to the outputs folder.
+    plt.show()
+
+if __name__ == "__main__":
+    main()
