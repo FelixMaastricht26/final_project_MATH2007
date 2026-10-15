@@ -9,7 +9,7 @@ This project explores the locations and masses of meteorites in NASA’s public 
 
 ## 📊 Dataset
 
-- Source: https://data.nasa.gov/Space-Science/Meteorite-Landings/gh4g-9sfh
+- Source: https://catalog.data.gov/dataset/meteorite-landings
 - File used: `data/meteorite_landings.csv`
 - Map outlines: `data/world_countries.geojson` from Natural Earth
 
