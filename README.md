@@ -15,7 +15,7 @@ This project explores the locations and masses of meteorites in NASA’s public 
 
 ## 🧪 What the script does
 
-- Automatically cleans the data; 
+- Automatically cleans the data
 - Excludes missing masses and, for mapping, missing/invalid coordinates and questionable `(0, 0)`.
 - Maps meteorites weighing at least 1 kg.
 - Counts records at four mass thresholds.
